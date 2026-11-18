@@ -70,6 +70,10 @@ export default function RiderHomeScreen() {
           <Pressable onPress={() => void load(true)} style={styles.refresh}><Text style={styles.refreshText}>{refreshing ? 'Loading...' : 'Refresh'}</Text></Pressable>
         </View>
       </View>
+      <Pressable onPress={() => router.push('/tracking')} style={styles.locationButton}>
+        <Text style={styles.locationButtonTitle}>Live location</Text>
+        <Text style={styles.locationButtonDescription}>Open GPS settings and start sharing with dispatch</Text>
+      </Pressable>
 
       <View style={styles.stats}>
         <View style={styles.statCard}><Text style={styles.statValue}>{delivered.length}</Text><Text style={styles.statLabel}>Completed deliveries</Text></View>
@@ -113,6 +117,9 @@ const styles = StyleSheet.create({
   title: { color: '#111111', fontSize: 27, fontWeight: '800', marginTop: 5 },
   refresh: { borderColor: '#DDD9D5', backgroundColor: '#FFFFFF', borderWidth: 1, borderRadius: 11, paddingVertical: 9, paddingHorizontal: 13 },
   refreshText: { color: '#111111', fontWeight: '700' },
+  locationButton: { borderWidth: 1, borderColor: '#FFD1B8', backgroundColor: '#FFF3EB', borderRadius: 14, padding: 14, gap: 4 },
+  locationButtonTitle: { color: ORANGE, fontSize: 14, fontWeight: '800' },
+  locationButtonDescription: { color: '#666666', fontSize: 12, lineHeight: 17 },
   stats: { flexDirection: 'row', gap: 12 },
   statCard: { flex: 1, borderWidth: 1, borderColor: '#E6E3E0', backgroundColor: '#FFFFFF', borderRadius: 15, padding: 14, minHeight: 92, justifyContent: 'center' },
   statValue: { color: '#111111', fontSize: 22, fontWeight: '800' },
