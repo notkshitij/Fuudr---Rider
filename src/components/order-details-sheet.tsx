@@ -2,6 +2,7 @@ import { Alert, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } 
 import { OrderPaymentQr } from './order-payment-qr';
 import { OrderStatusButton, type DeliveryStatus } from './order-status-button';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { haversineKm, formatDistance } from '@/services/distance';
 
 export type RestaurantDetails = {
   id: string; restaurant_name: string | null; address: string | null;
@@ -48,6 +49,9 @@ export function OrderDetailsSheet({ order, restaurant, onClose, updatingId, acti
     const parsed = typeof order.bill === 'string' ? JSON.parse(order.bill) : order.bill;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) bill = parsed;
   } catch { /* Missing or malformed bills remain explicitly unavailable. */ }
+  const distance = formatDistance(
+    haversineKm(restaurant?.latitude, restaurant?.longitude, order.delivery_latitude, order.delivery_longitude)
+  );
   return <Modal transparent visible animationType="slide" onRequestClose={onClose}>
     <View style={styles.overlay}>
       <Pressable style={StyleSheet.absoluteFill} accessible={false} onPress={onClose} />
@@ -64,6 +68,15 @@ export function OrderDetailsSheet({ order, restaurant, onClose, updatingId, acti
               {restaurant?.address ? <Text style={styles.address}>{restaurant.address}</Text> : null}</View>
             <Directions label="Directions to restaurant" to={destination(restaurant?.latitude, restaurant?.longitude, restaurant?.address)} />
           </View>
+          {distance ? (
+            <View style={styles.distanceRow}>
+              <View style={styles.distanceLine} />
+              <View style={styles.distanceBadge}>
+                <Text style={styles.distanceBadgeText}>📍 {distance} between restaurant & customer</Text>
+              </View>
+              <View style={styles.distanceLine} />
+            </View>
+          ) : null}
           <View style={styles.row}>
             <View style={styles.copy}><Text style={styles.label}>CUSTOMER</Text><Text style={styles.name}>{order.delivery_name || 'Name not available'}</Text>
               <Text style={styles.address}>{order.delivery_address || 'Address not available'}</Text></View>
@@ -104,4 +117,8 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderColor: '#E6E3E0', paddingTop: 12, marginTop: 4 },
   totalLabel: { color: '#111111', fontSize: 17, fontWeight: '800' },
   totalValue: { color: '#111111', fontSize: 17, fontWeight: '800' },
+  distanceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: -4 },
+  distanceLine: { flex: 1, height: 1, backgroundColor: '#E6E3E0' },
+  distanceBadge: { backgroundColor: '#F7F5F3', borderWidth: 1, borderColor: '#E6E3E0', borderRadius: 20, paddingVertical: 5, paddingHorizontal: 12 },
+  distanceBadgeText: { color: '#555555', fontSize: 12, fontWeight: '700' },
 });

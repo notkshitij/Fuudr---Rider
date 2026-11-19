@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { OrderStatusButton, nextDeliveryStatus, type DeliveryStatus } from '@/components/order-status-button';
@@ -7,6 +7,7 @@ import { OrderStatusButton, nextDeliveryStatus, type DeliveryStatus } from '@/co
 import { supabase } from '@/services/supabase';
 
 import { OrderDetailsSheet, type RiderOrder, type RestaurantDetails } from '@/components/order-details-sheet';
+import { haversineKm, formatDistance } from '@/services/distance';
 
 export default function RiderHomeScreen() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -135,13 +136,13 @@ export default function RiderHomeScreen() {
 
   return (
     <>
-    <ScrollView contentContainerStyle={styles.page}>
+    <ScrollView contentContainerStyle={styles.page}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={ORANGE} colors={[ORANGE]} />}>
       <View style={styles.header}>
         <View><Text style={styles.eyebrow}>RIDER HOME</Text><Text style={styles.title}>Hi, {name.split(' ')[0]}</Text></View>
-        <View style={styles.headerActions}>
-          <Pressable onPress={() => router.push('/profile')} style={styles.refresh}><Text style={styles.refreshText}>Profile</Text></Pressable>
-          <Pressable onPress={() => { setRefreshing(true); void load(); }} style={styles.refresh}><Text style={styles.refreshText}>{refreshing ? 'Loading...' : 'Refresh'}</Text></Pressable>
-        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Settings" onPress={() => router.push('/profile')} style={({ pressed }) => [styles.settingsBtn, pressed && { opacity: 0.6 }]}>
+          <Text style={styles.settingsIcon}>⚙</Text>
+        </Pressable>
       </View>
       <Pressable onPress={() => router.push('/tracking')} style={styles.locationButton}>
         <Text style={styles.locationButtonTitle}>Live location</Text>
@@ -155,27 +156,51 @@ export default function RiderHomeScreen() {
       <Text style={styles.sectionTitle}>Your orders</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {!orders.length && !error ? <View style={styles.empty}><Text style={styles.emptyTitle}>No orders assigned yet</Text><Text style={styles.body}>New orders assigned to you by the admin will appear here.</Text></View> : null}
-      {orders.map((order) => <View key={order.id} style={styles.orderCard}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`View details for order ${order.id.slice(0, 8)}`}
-          testID={`order-card-${order.id}`} onPress={() => setSelectedId(order.id)} style={({ pressed }) => [styles.orderBody, pressed && { opacity: 0.65 }]}>
-        <View style={styles.orderHeading}><Text style={styles.orderId}>Order {order.id.slice(0, 8)}</Text><Text style={styles.status}>{order.status.replace(/_/g, ' ')}</Text></View>
-        <Text style={styles.label}>DELIVER TO</Text><Text style={styles.address}>{order.delivery_address || 'No delivery address'}</Text>
-        <Text style={styles.detailsHint}>View order details ›</Text>
-        </Pressable>
-        {order.rider_response === 'pending' && !['cancelled', 'delivered'].includes(order.status) ? (
-          <View style={styles.headerActions}>
-            <Pressable accessibilityRole="button" disabled={responding || updatingId !== null} style={styles.refresh} onPress={() => confirmResponse(order, 'accepted')}>
-              <Text style={styles.refreshText}>Accept</Text>
+      {orders.map((order) => {
+        const restaurant = order.partner_id ? restaurants[order.partner_id] : undefined;
+        const distance = formatDistance(
+          haversineKm(restaurant?.latitude, restaurant?.longitude, order.delivery_latitude, order.delivery_longitude)
+        );
+        return (
+          <View key={order.id} style={styles.orderCard}>
+            <Pressable accessibilityRole="button" accessibilityLabel={`View details for order ${order.id.slice(0, 8)}`}
+              testID={`order-card-${order.id}`} onPress={() => setSelectedId(order.id)} style={({ pressed }) => [styles.orderBody, pressed && { opacity: 0.65 }]}>
+              <View style={styles.orderHeading}>
+                <Text style={styles.orderId}>Order {order.id.slice(0, 8)}</Text>
+                <View style={styles.orderBadges}>
+                  {distance ? (
+                    <View style={styles.distanceBadge}>
+                      <Text style={styles.distanceBadgeText}>📍 {distance}</Text>
+                    </View>
+                  ) : null}
+                  <Text style={styles.status}>{order.status.replace(/_/g, ' ')}</Text>
+                </View>
+              </View>
+              <Text style={styles.label}>DELIVER TO</Text>
+              <Text style={styles.address}>{order.delivery_address || 'No delivery address'}</Text>
+              {distance ? (
+                <Text style={styles.distanceInfo}>
+                  Distance from restaurant: <Text style={styles.distanceInfoValue}>{distance}</Text>
+                </Text>
+              ) : null}
+              <Text style={styles.detailsHint}>View order details ›</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" disabled={responding || updatingId !== null} style={styles.refresh} onPress={() => confirmResponse(order, 'rejected')}>
-              <Text style={styles.error}>Reject</Text>
-            </Pressable>
+            {order.rider_response === 'pending' && !['cancelled', 'delivered'].includes(order.status) ? (
+              <View style={styles.headerActions}>
+                <Pressable accessibilityRole="button" disabled={responding || updatingId !== null} style={styles.refresh} onPress={() => confirmResponse(order, 'accepted')}>
+                  <Text style={styles.refreshText}>Accept</Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" disabled={responding || updatingId !== null} style={styles.refresh} onPress={() => confirmResponse(order, 'rejected')}>
+                  <Text style={styles.error}>Reject</Text>
+                </Pressable>
+              </View>
+            ) : order.rider_response !== 'pending' ? (
+              <Text style={styles.body}>{order.rider_response === 'accepted' ? 'Delivery accepted' : 'Delivery rejected'}</Text>
+            ) : null}
+            <OrderStatusButton order={order} disabled={responding || updatingId !== null} busy={updatingId === order.id} onConfirm={confirmStatus} />
           </View>
-        ) : order.rider_response !== 'pending' ? (
-          <Text style={styles.body}>{order.rider_response === 'accepted' ? 'Delivery accepted' : 'Delivery rejected'}</Text>
-        ) : null}
-        <OrderStatusButton order={order} disabled={responding || updatingId !== null} busy={updatingId === order.id} onConfirm={confirmStatus} />
-      </View>)}
+        );
+      })}
 
     </ScrollView>
     <OrderDetailsSheet order={selected} restaurant={selected?.partner_id ? restaurants[selected.partner_id] : undefined} onClose={() => setSelectedId(null)} updatingId={updatingId} actionsDisabled={responding || updatingId !== null} onConfirmStatus={confirmStatus} />
@@ -193,6 +218,8 @@ const styles = StyleSheet.create({
   title: { color: '#111111', fontSize: 27, fontWeight: '800', marginTop: 5 },
   refresh: { borderColor: '#DDD9D5', backgroundColor: '#FFFFFF', borderWidth: 1, borderRadius: 11, paddingVertical: 9, paddingHorizontal: 13 },
   refreshText: { color: '#111111', fontWeight: '700' },
+  settingsBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F5F3F1', alignItems: 'center', justifyContent: 'center' },
+  settingsIcon: { fontSize: 22, color: '#333333' },
   locationButton: { borderWidth: 1, borderColor: '#FFD1B8', backgroundColor: '#FFF3EB', borderRadius: 14, padding: 14, gap: 4 },
   locationButtonTitle: { color: ORANGE, fontSize: 14, fontWeight: '800' },
   locationButtonDescription: { color: '#666666', fontSize: 12, lineHeight: 17 },
@@ -208,6 +235,11 @@ const styles = StyleSheet.create({
   orderBody: { gap: 9 },
   detailsHint: { color: ORANGE, fontSize: 12, fontWeight: '700' },
   orderHeading: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, alignItems: 'center' },
+  orderBadges: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' },
+  distanceBadge: { borderWidth: 1, borderColor: '#E6E3E0', backgroundColor: '#F8F7F5', borderRadius: 20, paddingVertical: 5, paddingHorizontal: 9 },
+  distanceBadgeText: { color: '#444444', fontSize: 11, fontWeight: '700' },
+  distanceInfo: { color: '#666666', fontSize: 13, marginTop: 2 },
+  distanceInfoValue: { color: '#111111', fontWeight: '700' },
   orderId: { color: '#111111', fontSize: 15, fontWeight: '800' },
   status: { color: ORANGE, borderWidth: 1, borderColor: '#FFD1B8', backgroundColor: '#FFF3EB', borderRadius: 20, paddingVertical: 5, paddingHorizontal: 9, fontSize: 11, fontWeight: '700' },
   label: { color: '#777777', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginTop: 5 },
