@@ -35,6 +35,14 @@
       "package": "com.menhu.riderapp"
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraProguardRules": "-keep class expo.modules.location.next.locationProviders.GmsLocationTaskConsumer { public <init>(android.content.Context, expo.modules.interfaces.taskManager.TaskManagerUtilsInterface); }\n-keep class expo.modules.location.next.locationProviders.AndroidLocationTaskConsumer { public <init>(android.content.Context, expo.modules.interfaces.taskManager.TaskManagerUtilsInterface); }"
+          }
+        }
+      ],
       "expo-router",
       [
         "expo-location",
