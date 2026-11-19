@@ -8,12 +8,15 @@ import { getLocationRuntime, isLocationTrackingSupported, LOCATION_BUILD_REQUIRE
 export { isLocationTrackingSupported } from '@/services/location-runtime';
 
 const TRACKING_ERROR_KEY = 'rider-location-tracking-error';
+const PENDING_FIX_KEY = 'rider-pending-location:';
 const PUBLISH_INTERVAL_MS = 15_000;
 const MIN_DISTANCE_METERS = 30;
 
 let updatesHandle: LocationUpdatesHandle | null = null;
 let lastPublishedAt = 0;
 let lastCoordinates: { latitude: number; longitude: number } | null = null;
+let lastFixTimestamp = 0;
+let recovering = false;
 let writeQueue = Promise.resolve();
 
 function getUpdatesHandle() {
@@ -40,7 +43,7 @@ function distanceMeters(a: { latitude: number; longitude: number }, b: { latitud
   return 6_371_000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-export async function saveRiderLocation(position: Position, force = false) {
+export async function saveRiderLocation(position: Pick<Position, 'coordinates' | 'timestamp'>, force = false, activeRiderId?: string) {
   const coordinates = position.coordinates;
   writeQueue = writeQueue.catch(() => undefined).then(async () => {
     const now = Date.now();
@@ -48,6 +51,13 @@ export async function saveRiderLocation(position: Position, force = false) {
         && distanceMeters(lastCoordinates, coordinates) < MIN_DISTANCE_METERS) return;
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) throw new Error('Sign in again to share your live location.');
+    if (activeRiderId && session.user.id !== activeRiderId) return;
+    if ((!force || activeRiderId) && !await getUpdatesHandle().hasStarted()) return;
+    if (position.timestamp < lastFixTimestamp) return;
+    const pendingKey = PENDING_FIX_KEY + session.user.id;
+    const saved = await AsyncStorage.getItem(pendingKey);
+    if (saved && (JSON.parse(saved) as Pick<Position, 'timestamp'>).timestamp > position.timestamp) return;
+    await AsyncStorage.setItem(pendingKey, JSON.stringify({ coordinates, timestamp: position.timestamp }));
     const { error } = await supabase.from('rider_live_locations').upsert({
       rider_id: session.user.id,
       latitude: coordinates.latitude,
@@ -56,11 +66,32 @@ export async function saveRiderLocation(position: Position, force = false) {
       position_timestamp: new Date(position.timestamp).toISOString(),
     }, { onConflict: 'rider_id' });
     if (error) throw new Error(error.message);
+    lastFixTimestamp = position.timestamp;
     lastPublishedAt = Date.now();
     lastCoordinates = coordinates;
-    await AsyncStorage.removeItem(TRACKING_ERROR_KEY);
+    await AsyncStorage.multiRemove([pendingKey, TRACKING_ERROR_KEY]);
   });
   return writeQueue;
+}
+
+export async function retryPendingRiderLocation() {
+  if (recovering || !isLocationTrackingSupported()) return;
+  recovering = true;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user || !await getUpdatesHandle().hasStarted()) return;
+    const riderId = session.user.id;
+    const pending = await AsyncStorage.getItem(PENDING_FIX_KEY + riderId);
+    if (!pending) return;
+    const saved = JSON.parse(pending) as Pick<Position, 'coordinates' | 'timestamp'>;
+    const { Location } = getLocationRuntime();
+    const current = await Location.getPosition({ timeout: 10, maxCachedAge: 5 }).catch(() => null);
+    await saveRiderLocation(current && current.timestamp >= saved.timestamp ? current : saved, true, riderId);
+  } catch {
+    // The next foreground retry or background fix can upload the pending position.
+  } finally {
+    recovering = false;
+  }
 }
 
 export async function recordTrackingError(message: string) {
@@ -100,8 +131,6 @@ export async function startRiderLocationTracking() {
 
   const position = await Location.getPosition({ timeout: 20, maxCachedAge: 5 });
   if (!position) throw new LocationTrackingError('GPS could not get a position. Move outdoors and try again.');
-  await saveRiderLocation(position, true);
-
   const handle = getUpdatesHandle();
   if (!await handle.hasStarted()) await handle.start();
   if (Platform.OS === 'android') {
@@ -111,7 +140,11 @@ export async function startRiderLocationTracking() {
       notificationColor: 0xF04400,
     });
   }
-  await AsyncStorage.removeItem(TRACKING_ERROR_KEY);
+  try {
+    await saveRiderLocation(position, true);
+  } catch {
+    await recordTrackingError('Location could not be uploaded. Rider will retry while sharing is on.');
+  }
   return position;
 }
 export async function stopRiderLocationTracking() {
@@ -124,6 +157,8 @@ export async function stopRiderLocationTracking() {
   if (Platform.OS === 'android') await Location.stopBackgroundSession();
 
   const { data: { session } } = await supabase.auth.getSession();
+  await writeQueue.catch(() => undefined);
+  if (session?.user) await AsyncStorage.removeItem(PENDING_FIX_KEY + session.user.id);
   if (session?.user && wasStarted) {
     const { error } = await supabase.from('rider_live_locations').upsert({
       rider_id: session.user.id,
@@ -134,6 +169,7 @@ export async function stopRiderLocationTracking() {
     }, { onConflict: 'rider_id' });
     if (error) throw new Error(error.message);
   }
+  lastFixTimestamp = 0;
   lastCoordinates = null;
   lastPublishedAt = 0;
   await AsyncStorage.removeItem(TRACKING_ERROR_KEY);
@@ -164,7 +200,7 @@ export async function getRiderTrackingSnapshot() {
   const androidStatus = Platform.OS === 'android' ? getUpdatesHandle().status() : null;
   return {
     supported: true as const,
-    isTracking: started && Boolean(locationResult.data?.tracking_active),
+    isTracking: started,
     latitude: locationResult.data?.latitude ?? null,
     longitude: locationResult.data?.longitude ?? null,
     positionTimestamp: locationResult.data?.position_timestamp ?? null,
