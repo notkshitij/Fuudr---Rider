@@ -1,8 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Location, LocationProfile, LocationScope, LocationUpdatesHandle, type Position } from 'expo-location/next';
+import type { LocationUpdatesHandle, Position } from 'expo-location/next';
 import { Platform } from 'react-native';
 
 import { supabase } from '@/services/supabase';
+import { getLocationRuntime, isLocationTrackingSupported, LOCATION_BUILD_REQUIRED } from '@/services/location-runtime';
+
+export { isLocationTrackingSupported } from '@/services/location-runtime';
 
 const TRACKING_ERROR_KEY = 'rider-location-tracking-error';
 const PUBLISH_INTERVAL_MS = 15_000;
@@ -14,6 +17,7 @@ let lastCoordinates: { latitude: number; longitude: number } | null = null;
 let writeQueue = Promise.resolve();
 
 function getUpdatesHandle() {
+  const { LocationUpdatesHandle, LocationProfile } = getLocationRuntime();
   if (!updatesHandle) {
     updatesHandle = new LocationUpdatesHandle().withProfile(LocationProfile.AUTOMOTIVE_NAVIGATION);
   }
@@ -64,6 +68,7 @@ export async function recordTrackingError(message: string) {
 }
 
 export async function startRiderLocationTracking() {
+  const { Location, LocationScope } = getLocationRuntime();
   if (!Location.hasLocationServicesEnabled()) {
     if (Platform.OS !== 'android' || !await Location.enableLocationServices()) {
       throw new LocationTrackingError('Turn on your phone location services, then try again.');
@@ -109,8 +114,9 @@ export async function startRiderLocationTracking() {
   await AsyncStorage.removeItem(TRACKING_ERROR_KEY);
   return position;
 }
-
 export async function stopRiderLocationTracking() {
+  if (!isLocationTrackingSupported()) return;
+  const { Location } = getLocationRuntime();
   let wasStarted = false;
   const handle = getUpdatesHandle();
   wasStarted = await handle.hasStarted();
@@ -134,6 +140,17 @@ export async function stopRiderLocationTracking() {
 }
 
 export async function getRiderTrackingSnapshot() {
+  if (!isLocationTrackingSupported()) {
+    return {
+      supported: false as const,
+      isTracking: false,
+      latitude: null,
+      longitude: null,
+      positionTimestamp: null,
+      updatedAt: null,
+      trackingError: LOCATION_BUILD_REQUIRED,
+    };
+  }
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
   if (sessionError) throw new Error(sessionError.message);
   if (!session?.user) throw new Error('Sign in to view location tracking.');
@@ -157,6 +174,7 @@ export async function getRiderTrackingSnapshot() {
 }
 
 export async function refreshCurrentRiderLocation(publishToDispatch = false) {
+  const { Location } = getLocationRuntime();
   const permission = await Location.getForegroundPermissions();
   if (!permission.granted) throw new LocationTrackingError('Allow location access to read your current position.');
   if (!Location.hasLocationServicesEnabled()) throw new LocationTrackingError('Phone location services are turned off.');
@@ -166,8 +184,4 @@ export async function refreshCurrentRiderLocation(publishToDispatch = false) {
   if (!session?.user) throw new LocationTrackingError('Sign in again to update your location.');
   if (publishToDispatch) await saveRiderLocation(position, true);
   return position;
-}
-
-export function isLocationTrackingSupported() {
-  return true;
 }

@@ -89,8 +89,8 @@ export default function LocationTrackingScreen() {
     <View style={styles.statusCard}>
       <View style={[styles.statusDot, isTracking && styles.statusDotActive]} />
       <View style={styles.statusCopy}>
-        <Text style={styles.statusTitle}>{!supported ? 'Mobile app required' : isTracking ? 'Location sharing is on' : 'Location sharing is off'}</Text>
-        <Text style={styles.statusDescription}>{!supported ? 'Background GPS is available in the Android and iOS app.' : isTracking ? 'Dispatch can see your latest position.' : 'Your location is not being sent to dispatch.'}</Text>
+        <Text style={styles.statusTitle}>{!supported ? 'Updated Rider app required' : isTracking ? 'Location sharing is on' : 'Location sharing is off'}</Text>
+        <Text style={styles.statusDescription}>{!supported ? 'Install the latest Rider development app to use live location sharing.' : isTracking ? 'Dispatch can see your latest position.' : 'Your location is not being sent to dispatch.'}</Text>
       </View>
     </View>
 

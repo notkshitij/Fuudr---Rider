@@ -1,8 +1,8 @@
-import { defineLocationTask } from 'expo-location/next';
+import { getLocationRuntime, isLocationTrackingSupported } from '@/services/location-runtime';
 
 import { recordTrackingError, saveRiderLocation } from '@/services/location-tracking';
 
-defineLocationTask({
+if (isLocationTrackingSupported()) getLocationRuntime().defineLocationTask({
   onPosition: (position) => {
     void saveRiderLocation(position).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : 'Could not save the latest GPS position.';
